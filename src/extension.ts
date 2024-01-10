@@ -4,17 +4,19 @@ import path = require("path");
 
 const outChannel = vscode.window.createOutputChannel("Scriptify");
 
-async function getSpecificWorkspaceScript(scriptName: string): Promise<string | undefined> {
+async function getSpecificWorkspaceScript(directory: string, scriptName: string): Promise<string | undefined> {
 	if (vscode.workspace.workspaceFolders == undefined || vscode.workspace.workspaceFolders.length < 1) {
 		vscode.window.showErrorMessage("Must have a workspace open with a script file in .vscode/scripts");
 		return;
 	}
+
 	if (!scriptName.endsWith(".js")) {
 		scriptName = scriptName + ".js";
 	}
-	let scriptPath = path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, ".vscode/commands", scriptName);
+
+	let scriptPath = path.join(directory, "scriptCommands", scriptName);
 	if (!fs.existsSync(scriptPath)) {
-		vscode.window.showInformationMessage("Must have a .vscode/commands directory with a file called '" + scriptPath + "' in it");
+		vscode.window.showInformationMessage("Must have a script at location '" + scriptPath + "'");
 		return;
 	}
 
@@ -98,7 +100,9 @@ export function activate(context: vscode.ExtensionContext) {
 			return;
 		}
 
-		getSpecificWorkspaceScript(commandName).then(script => {
+		const commandDirectory = path.dirname(path.dirname(context.globalStorageUri.fsPath));
+
+		getSpecificWorkspaceScript(commandDirectory, commandName).then(script => {
 			try {
 				if (script == undefined) return;
 
