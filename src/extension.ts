@@ -95,34 +95,50 @@ export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposable);
 
 	disposable = vscode.commands.registerCommand("scriptify.customCommand", (commandName: string = "") => {
-		if (commandName.length == 0) {
-			vscode.window.showErrorMessage("No command name passed");
-			return;
+		if (commandName.length > 0) {
+			const commandDirectory = path.dirname(path.dirname(context.globalStorageUri.fsPath));
+	
+			getSpecificWorkspaceScript(commandDirectory, commandName).then(script => {
+				try {
+					if (script == undefined) return;
+	
+					let commandScript = eval(script);
+					if (commandScript == undefined || typeof commandScript !== "function") {
+						vscode.window.showErrorMessage("Selected script did not return a function that can be used to run a command");
+					}
+	
+					let logger = (...items: any[]) => {
+						let result = items.join(" ");
+						outChannel.appendLine(result);
+					}
+					commandScript(logger, context);
+	
+				} catch (e) {
+					vscode.window.showErrorMessage("Error running selected script:\n" + (e as Error).message + " at " + (e as Error).stack);
+					return;
+				}
+			});
+		} else {
+			getWorkspaceScript().then(script => {
+				try {
+					if (script == undefined) return;
+
+					let commandScript = eval(script);
+					if (commandScript == undefined || typeof commandScript !== "function") {
+						vscode.window.showErrorMessage("Selected script did not return a function that can be used to run a command");
+					}
+
+					let logger = (...items: any[]) => {
+						let result = items.join(" ");
+						outChannel.appendLine(result);
+					}
+					commandScript(logger, context);
+				} catch (e) {
+					vscode.window.showErrorMessage("Error running selected script:\n" + (e as Error).message + " at " + (e as Error).stack);
+					return;
+				}
+			});
 		}
-
-		const commandDirectory = path.dirname(path.dirname(context.globalStorageUri.fsPath));
-
-		getSpecificWorkspaceScript(commandDirectory, commandName).then(script => {
-			try {
-				if (script == undefined) return;
-
-				let commandScript = eval(script);
-				if (commandScript == undefined || typeof commandScript !== "function") {
-					vscode.window.showErrorMessage("Selected script did not return a function that can be used to run a command");
-				}
-
-				let logger = (...items: any[]) => {
-					let result = items.join(" ");
-					outChannel.appendLine(result);
-				}
-				commandScript(logger, context);
-
-			} catch (e) {
-				vscode.window.showErrorMessage("Error running selected script:\n" + (e as Error).message + " at " + (e as Error).stack);
-				return;
-			}
-		});
-		
 	});
 
 	context.subscriptions.push(disposable);

@@ -15,11 +15,11 @@
     "commands": [
       {
         "command": "scriptify.transform",
-        "title": "Transform selection with script"
+        "title": "Scriptify: Transform selection with script"
       },
       {
         "command": "scriptify.customCommand",
-        "title": "Run JS command (do not run this directly, must be run via keybind with arguments)"
+        "title": "Scriptify: Run JS command"
       }
     ]
   },
