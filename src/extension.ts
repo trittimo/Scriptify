@@ -74,14 +74,19 @@ export function activate(context: vscode.ExtensionContext) {
 				}
 
 				vscode.window.activeTextEditor!.edit((editBuilder) => {
-					transformFunc(selections, getTextFn, editBuilder, logger);
-				}).then((success) => {
-					if (!success) {
-						vscode.window.showErrorMessage("Unable to edit the selected text when running the returned edit function");
-					} else {
-						let selectionCount = vscode.window.activeTextEditor!.selections.length == 0 ? 1 : vscode.window.activeTextEditor!.selections.length;
-						vscode.window.showInformationMessage(`Successfully replaced (${selectionCount}) selections`);
+					try {
+						transformFunc(selections, getTextFn, editBuilder, logger);
+					} catch (e) {
+						vscode.window.showErrorMessage("Failed to run script - details in output log");
+						logger((e as Error).stack);
 					}
+				}).then((success) => {
+					// if (!success) {
+					// 	vscode.window.showErrorMessage("Unable to edit the selected text when running the returned edit function");
+					// } else {
+					// 	let selectionCount = vscode.window.activeTextEditor!.selections.length == 0 ? 1 : vscode.window.activeTextEditor!.selections.length;
+					// 	vscode.window.showInformationMessage(`Successfully replaced (${selectionCount}) selections`);
+					// }
 				});
 
 			} catch (e) {
@@ -111,7 +116,12 @@ export function activate(context: vscode.ExtensionContext) {
 						let result = items.join(" ");
 						outChannel.appendLine(result);
 					}
-					commandScript(logger, context);
+					try {
+						commandScript(logger, context);
+					} catch (e) {
+						vscode.window.showErrorMessage("Failed to run script - details in output log");
+						logger((e as Error).stack);
+					}
 	
 				} catch (e) {
 					vscode.window.showErrorMessage("Error running selected script:\n" + (e as Error).message + " at " + (e as Error).stack);
@@ -132,7 +142,12 @@ export function activate(context: vscode.ExtensionContext) {
 						let result = items.join(" ");
 						outChannel.appendLine(result);
 					}
-					commandScript(logger, context);
+					try {
+						commandScript(logger, context);
+					} catch (e) {
+						vscode.window.showErrorMessage("Failed to run script - details in output log");
+						logger((e as Error).stack);
+					}
 				} catch (e) {
 					vscode.window.showErrorMessage("Error running selected script:\n" + (e as Error).message + " at " + (e as Error).stack);
 					return;
