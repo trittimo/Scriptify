@@ -2,19 +2,39 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import path = require("path");
 
+const COMMAND_TEMPLATE =
+`//  @ts-check
+//  API: https://code.visualstudio.com/api/references/vscode-api
+
+const vscode = require("vscode");
+/**
+ * @callback Logger
+ * @param {...any} args
+ */
+
+/**
+ * Command to run
+ * @param {Logger} logger - A VSCode output channel which can be used for logging (viewable in Output -> Scriptify)
+ * @param {vscode.ExtensionContext} context
+ */
+async function command(logger, context) {
+	// TODO - Implement your command here
+}
+
+// Make sure your command is the last statement in the file
+command;
+`;
+
+let defaultCommand = "";
+
 const outChannel = vscode.window.createOutputChannel("Scriptify");
 
-async function getSpecificWorkspaceScript(directory: string, scriptName: string): Promise<string | undefined> {
-	if (vscode.workspace.workspaceFolders == undefined || vscode.workspace.workspaceFolders.length < 1) {
-		vscode.window.showErrorMessage("Must have a workspace open with a script file in .vscode/scripts");
-		return;
-	}
-
+async function getCommandContent(directory: string, scriptName: string): Promise<string | undefined> {
 	if (!scriptName.endsWith(".js")) {
 		scriptName = scriptName + ".js";
 	}
 
-	let scriptPath = path.join(directory, "scriptCommands", scriptName);
+	let scriptPath = path.join(directory, scriptName);
 	if (!fs.existsSync(scriptPath)) {
 		vscode.window.showInformationMessage("Must have a script at location '" + scriptPath + "'");
 		return;
@@ -24,139 +44,200 @@ async function getSpecificWorkspaceScript(directory: string, scriptName: string)
 	return script.toString();
 }
 
-async function getWorkspaceScript(): Promise<string | undefined> {
+function getGlobalCommandsPath(context: vscode.ExtensionContext): string {
+	let result = path.join(path.dirname(path.dirname(context.globalStorageUri.fsPath)), "scriptify");
+	return result;
+}
+
+function getWorkspaceCommandsPath(): string | undefined {
 	if (vscode.workspace.workspaceFolders == undefined || vscode.workspace.workspaceFolders.length < 1) {
-		vscode.window.showErrorMessage("Must have a workspace open with a script file in .vscode/scripts");
-		return;
-	}
-	let scriptsPath = path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, ".vscode/scripts");
-	if (!fs.existsSync(scriptsPath)) {
-		vscode.window.showInformationMessage("Must have a .vscode/scripts directory with a js script in it");
 		return;
 	}
 
-	let scriptPickList: vscode.QuickPickItem[] = [];
-	for (let fileName of fs.readdirSync(scriptsPath)) {
-		if (!fileName.toLowerCase().endsWith(".js")) {
-			continue;
+	let scriptsPath = path.join(vscode.workspace.workspaceFolders![0].uri.fsPath, ".vscode/commands");
+	return scriptsPath;
+}
+
+function createDirectoryIfNotExists(path: string) {
+	try {
+		if (!fs.existsSync(path)) {
+			fs.mkdirSync(path);
 		}
-
-		scriptPickList.push({label: fileName});
+	} catch {
+		vscode.window.showErrorMessage("Error creating directory at " + path);
 	}
-	let chosenScript = await vscode.window.showQuickPick(scriptPickList);
+}
+
+async function promptCreateDirectory(dirPath: string): Promise<boolean> {
+	let shouldCreateDir = await vscode.window.showQuickPick(["No", "Yes"], {title: "You don't have a .vscode/commands directory, would you like to create one?", canPickMany: false, placeHolder: "No"});
+	if (shouldCreateDir == "Yes") {
+		createDirectoryIfNotExists(dirPath);
+		return true;
+	}
+	return false;
+}
+
+async function interactiveGetCommandContent(context: vscode.ExtensionContext): Promise<string | undefined> {
+	const globalCommandPath = getGlobalCommandsPath(context);
+	const workspaceCommandPath = getWorkspaceCommandsPath();
+
+	const scriptPickList: vscode.QuickPickItem[] = [];
+	if (workspaceCommandPath != undefined) {
+		
+		for (let fileName of fs.readdirSync(workspaceCommandPath)) {
+			if (!fileName.toLowerCase().endsWith(".js")) {
+				continue;
+			}
+			
+			scriptPickList.push({label: fileName + " (workspace)"});
+		}
+		if (scriptPickList.length > 0) {
+			scriptPickList.splice(0, 0, {label: "Workspace commands", kind: vscode.QuickPickItemKind.Separator});
+		}
+	}
+
+	if (globalCommandPath != null) {
+		let needsSep = scriptPickList.length > 0;
+		for (let fileName of fs.readdirSync(globalCommandPath)) {
+			if (needsSep) {
+				scriptPickList.push({label: "Global commands", kind: vscode.QuickPickItemKind.Separator});
+				needsSep = false;
+			}
+			if (!fileName.toLowerCase().endsWith(".js")) {
+				continue;
+			}
+			scriptPickList.push({label: fileName + " (global)"});
+		}
+	}
+
+	if (scriptPickList.length == 0) {
+		vscode.window.showInformationMessage("You haven't created any commands yet");
+		return;
+	}
+
+	// Put the last command run on the top so it is the default
+	let foundDefault = false;
+	scriptPickList.sort((a, b) => {
+		if (a.label == defaultCommand) {
+			foundDefault = true;
+			return -1;
+		}
+		return 0;
+	});
+	
+	// If we have a default command, add a separator between it and everything else
+	if (foundDefault && scriptPickList.length > 1) {
+		scriptPickList.splice(0, 0, {label: "Last command run", kind: vscode.QuickPickItemKind.Separator});
+	}
+	
+	let chosenScript = await vscode.window.showQuickPick(scriptPickList, {canPickMany: false});
 	if (chosenScript == undefined) return;
 
-	let script = fs.readFileSync(path.join(scriptsPath, chosenScript.label));
-	return script.toString();
+	defaultCommand = chosenScript.label;
+
+	let selectedPath = chosenScript.label;
+
+	if (selectedPath.endsWith(" (workspace)")) {
+		selectedPath = path.join(workspaceCommandPath!, selectedPath.slice(0, selectedPath.length - " (workspace)".length));
+	} else if (selectedPath.endsWith(" (global)")) {
+		selectedPath = path.join(globalCommandPath, selectedPath.slice(0, selectedPath.length - " (global)".length));
+	} else {
+		return;
+	}
+
+	try {
+		return fs.readFileSync(selectedPath, {encoding: "utf-8"}) + "";
+	} catch {
+		vscode.window.showErrorMessage("Unable to read file at: '" + selectedPath + "'");
+	}
+}
+
+async function runScript(script: string | undefined, context: vscode.ExtensionContext) {
+	if (script == undefined) return;
+
+	let logger = (...items: any[]) => {
+		let result = items.join(" ");
+		outChannel.appendLine(result);
+	}
+
+	try {
+		let commandScript = eval(script);
+		if (commandScript == undefined || typeof commandScript !== "function") {
+			vscode.window.showErrorMessage("Selected script did not return a function that can be used to run a command");
+		}
+
+		commandScript(logger, context);
+	} catch (e) {
+		vscode.window.showErrorMessage("Failed to run script - details in output log");
+		logger((e as Error).stack);
+	}
 }
 
 export function activate(context: vscode.ExtensionContext) {
-	let disposable = vscode.commands.registerCommand("scriptify.transform", () => {
-		if (vscode.window.activeTextEditor == undefined) {
-			vscode.window.showInformationMessage("Must have an active text editor open to run this command");
-			return;
-		}
+	context.subscriptions.push(vscode.commands.registerCommand("scriptify.createCommand", async () => {
+		const commandType = await vscode.window.showQuickPick(["Local", "Global"], {title: "Would you like to create a global command or a local workspace command?", canPickMany: false, placeHolder: "Local"});
+		if (!commandType) return;
 
-		getWorkspaceScript().then(script => {
-			try {
-				if (script == undefined) return;
+		let commandName = await vscode.window.showInputBox({prompt: "Command name", placeHolder: "my_command", title: "What would you like to call your command?"});
+		if (!commandName) return;
+		if (!commandName.toLowerCase().endsWith(".js")) commandName += ".js";
 
-				let transformFunc = eval(script);
-				if (transformFunc == undefined || typeof transformFunc !== "function") {
-					vscode.window.showErrorMessage("Selected script did not return a function that can be used to transform text");
-				}
-
-				let getTextFn = vscode.window.activeTextEditor!.document.getText;
-				let selections = vscode.window.activeTextEditor!.selections;
-				let logger = (...items: any[]) => {
-					let result = items.join(" ");
-					outChannel.appendLine(result);
-				}
-
-				vscode.window.activeTextEditor!.edit((editBuilder) => {
-					try {
-						transformFunc(selections, getTextFn, editBuilder, logger);
-					} catch (e) {
-						vscode.window.showErrorMessage("Failed to run script - details in output log");
-						logger((e as Error).stack);
-					}
-				}).then((success) => {
-					// if (!success) {
-					// 	vscode.window.showErrorMessage("Unable to edit the selected text when running the returned edit function");
-					// } else {
-					// 	let selectionCount = vscode.window.activeTextEditor!.selections.length == 0 ? 1 : vscode.window.activeTextEditor!.selections.length;
-					// 	vscode.window.showInformationMessage(`Successfully replaced (${selectionCount}) selections`);
-					// }
-				});
-
-			} catch (e) {
-				vscode.window.showErrorMessage("Error running selected script:\n" + (e as Error).message + " at " + (e as Error).stack);
+		let targetDirectoryPath: string | undefined;
+		if (commandType == "Local") {
+			targetDirectoryPath = getWorkspaceCommandsPath();
+			if (!targetDirectoryPath) {
+				vscode.window.showErrorMessage("Must have workspace open to create a local command");
 				return;
 			}
-		});
-		
-	});
-
-	context.subscriptions.push(disposable);
-
-	disposable = vscode.commands.registerCommand("scriptify.customCommand", (commandName: string = "") => {
-		if (commandName.length > 0) {
-			const commandDirectory = path.dirname(path.dirname(context.globalStorageUri.fsPath));
-	
-			getSpecificWorkspaceScript(commandDirectory, commandName).then(script => {
-				try {
-					if (script == undefined) return;
-	
-					let commandScript = eval(script);
-					if (commandScript == undefined || typeof commandScript !== "function") {
-						vscode.window.showErrorMessage("Selected script did not return a function that can be used to run a command");
-					}
-	
-					let logger = (...items: any[]) => {
-						let result = items.join(" ");
-						outChannel.appendLine(result);
-					}
-					try {
-						commandScript(logger, context);
-					} catch (e) {
-						vscode.window.showErrorMessage("Failed to run script - details in output log");
-						logger((e as Error).stack);
-					}
-	
-				} catch (e) {
-					vscode.window.showErrorMessage("Error running selected script:\n" + (e as Error).message + " at " + (e as Error).stack);
-					return;
-				}
-			});
 		} else {
-			getWorkspaceScript().then(script => {
-				try {
-					if (script == undefined) return;
-
-					let commandScript = eval(script);
-					if (commandScript == undefined || typeof commandScript !== "function") {
-						vscode.window.showErrorMessage("Selected script did not return a function that can be used to run a command");
-					}
-
-					let logger = (...items: any[]) => {
-						let result = items.join(" ");
-						outChannel.appendLine(result);
-					}
-					try {
-						commandScript(logger, context);
-					} catch (e) {
-						vscode.window.showErrorMessage("Failed to run script - details in output log");
-						logger((e as Error).stack);
-					}
-				} catch (e) {
-					vscode.window.showErrorMessage("Error running selected script:\n" + (e as Error).message + " at " + (e as Error).stack);
-					return;
-				}
-			});
+			targetDirectoryPath = getGlobalCommandsPath(context);
 		}
-	});
 
-	context.subscriptions.push(disposable);
+		createDirectoryIfNotExists(targetDirectoryPath);
+		let scriptPath = path.join(targetDirectoryPath, commandName);
+		if (fs.existsSync(scriptPath)) {
+			// Just open existing scripts
+			let doc = await vscode.workspace.openTextDocument(scriptPath);
+			vscode.window.showTextDocument(doc);
+		} else {
+			fs.writeFileSync(scriptPath, COMMAND_TEMPLATE);
+			let doc = await vscode.workspace.openTextDocument(scriptPath);
+			vscode.window.showTextDocument(doc);
+		}
+	}));
+	context.subscriptions.push(vscode.commands.registerCommand("scriptify.runCommand", async (commandName: string = "") => {
+		let script: string | undefined;
+		if (commandName.length > 0) {
+			script = await getCommandContent(getGlobalCommandsPath(context), commandName);
+		} else {
+			script = await interactiveGetCommandContent(context);
+		}
+		runScript(script, context);
+	}));
+	context.subscriptions.push(vscode.commands.registerCommand("scriptify.openCommandDirectory", async () => {
+		const commandType = await vscode.window.showQuickPick(["Local", "Global"], {title: "Would you like to open the global command directory or local command directory?", canPickMany: false, placeHolder: "Local"});
+		if (!commandType) return;
+
+		let targetDirectoryPath: string | undefined;
+		if (commandType == "Local") {
+			targetDirectoryPath = getWorkspaceCommandsPath();
+			if (!targetDirectoryPath) {
+				vscode.window.showErrorMessage("Cannot open directory for local workspace because no workspace is open");
+				return;
+			}
+		} else {
+			targetDirectoryPath = getGlobalCommandsPath(context);
+		}
+
+		if (!fs.existsSync(targetDirectoryPath)) {
+			let createdDir = await promptCreateDirectory(targetDirectoryPath);
+			if (!createdDir) {
+				return;
+			}
+		}
+		let uri = vscode.Uri.file(targetDirectoryPath);
+		await vscode.commands.executeCommand("revealFileInOS", uri);
+	}));
 }
 
 export function deactivate() {}
