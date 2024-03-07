@@ -173,6 +173,8 @@ async function runScript(script: string | undefined, context: vscode.ExtensionCo
 	}
 }
 
+type CommandType = "local" | "global";
+
 export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(vscode.commands.registerCommand("scriptify.createCommand", async () => {
 		const commandType = await vscode.window.showQuickPick(["Local", "Global"], {title: "Would you like to create a global command or a local workspace command?", canPickMany: false, placeHolder: "Local"});
@@ -205,10 +207,19 @@ export function activate(context: vscode.ExtensionContext) {
 			vscode.window.showTextDocument(doc);
 		}
 	}));
-	context.subscriptions.push(vscode.commands.registerCommand("scriptify.runCommand", async (commandName: string = "") => {
+	context.subscriptions.push(vscode.commands.registerCommand("scriptify.runCommand", async (command: {commandType: CommandType, commandName: string}) => {
 		let script: string | undefined;
-		if (commandName.length > 0) {
-			script = await getCommandContent(getGlobalCommandsPath(context), commandName);
+		if (command) {
+			if (command.commandType == "local") {
+				let commandsPath = getWorkspaceCommandsPath();
+				if (!commandsPath) {
+					vscode.window.showErrorMessage("Cannot run local command because no workspace is open");
+					return;
+				}
+				script = await getCommandContent(commandsPath, command.commandName);
+			} else {
+				script = await getCommandContent(getGlobalCommandsPath(context), command.commandName);
+			}
 		} else {
 			script = await interactiveGetCommandContent(context);
 		}
