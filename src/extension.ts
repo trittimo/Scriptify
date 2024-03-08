@@ -152,7 +152,7 @@ async function interactiveGetCommandContent(context: vscode.ExtensionContext): P
 	}
 }
 
-async function runScript(script: string | undefined, context: vscode.ExtensionContext) {
+async function runScript(script: string | undefined, context: vscode.ExtensionContext): Promise<any> {
 	if (script == undefined) return;
 
 	let logger = (...items: any[]) => {
@@ -166,10 +166,11 @@ async function runScript(script: string | undefined, context: vscode.ExtensionCo
 			vscode.window.showErrorMessage("Selected script did not return a function that can be used to run a command");
 		}
 
-		commandScript(logger, context);
+		return commandScript(logger, context);
 	} catch (e) {
 		vscode.window.showErrorMessage("Failed to run script - details in output log");
 		logger((e as Error).stack);
+		return false;
 	}
 }
 
@@ -223,7 +224,7 @@ export function activate(context: vscode.ExtensionContext) {
 		} else {
 			script = await interactiveGetCommandContent(context);
 		}
-		runScript(script, context);
+		return runScript(script, context);
 	}));
 	context.subscriptions.push(vscode.commands.registerCommand("scriptify.openCommandDirectory", async () => {
 		const commandType = await vscode.window.showQuickPick(["Local", "Global"], {title: "Would you like to open the global command directory or local command directory?", canPickMany: false, placeHolder: "Local"});
